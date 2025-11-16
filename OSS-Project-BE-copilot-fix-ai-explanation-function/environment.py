@@ -162,33 +162,27 @@ class MARLStockEnv(gym.Env):
                     self.entry_prices[i] = float(new_price)
                     transaction_costs += 0.003
 
-        # [개선] 보상 계산 - 더 강한 시그널
+        # [개선] 보상 계산 - 더 강한 수익 시그널
         joint_position = sum(self.positions)
         
-        # 1. 비율 기반 홀딩 보상 (메인 시그널)
-        holding_reward = float(joint_position * price_return)
+        # 1. 비율 기반 홀딩 보상 (메인 시그널) - 강화
+        holding_reward = float(joint_position * price_return * 3.0)  # 3배 강화
         
         # 2. 즉시 실현 수익 (강화)
-        instant_rewards = instant_rewards * 2.0  # 실현 수익에 더 큰 가중치
+        instant_rewards = instant_rewards * 3.0  # 2.0 -> 3.0 실현 수익 강화
         
         # 3. 거래 비용 페널티 감소 (너무 강한 페널티는 학습 방해)
-        transaction_costs = transaction_costs * 0.5
+        transaction_costs = transaction_costs * 0.3  # 0.5 -> 0.3
         
-        # 4. 다양성 보너스 (에이전트들이 다른 행동을 하도록 유도)
-        unique_actions = len(set(actions.values()))
-        diversity_bonus = 0.01 * (unique_actions - 1)  # 0 ~ 0.02
+        # 4. 다양성 보너스 제거 (단순화)
         
-        # 5. 포지션 유지 페널티 완화
-        hold_count = sum(1 for a in actions.values() if a == 1)
-        hold_penalty = -0.001 * hold_count if hold_count == self.n_agents else 0.0
+        # 5. 포지션 유지 페널티 제거 (hold도 전략의 일부)
         
         # 6. 최종 보상 (스케일 조정 전)
         raw_team_reward = (
             holding_reward + 
             instant_rewards - 
-            transaction_costs + 
-            diversity_bonus + 
-            hold_penalty
+            transaction_costs
         )
         
         # 7. REWARD_SCALE 적용

@@ -227,8 +227,14 @@ def main():
                        
             # [개선] 학습은 warmup 후에만 시작
             if warmup_done and len(buffer) >= BATCH_SIZE * 2:
-                # 초반에는 더 많이 학습
-                num_updates = 8 if i_episode < 50 else 4
+                # 초반에는 더 많이 학습, 후반에는 적게
+                if i_episode < 30:
+                    num_updates = 8
+                elif i_episode < 60:
+                    num_updates = 4
+                else:
+                    num_updates = 2  # 후반부는 학습 빈도 감소
+                    
                 for _ in range(num_updates):
                     loss, q_val = learner.train(buffer)
                     if loss is not None:

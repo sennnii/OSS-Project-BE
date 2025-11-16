@@ -6,37 +6,26 @@ import random
 import numpy as np
 from config import N_AGENTS, LR, TAU, MIXER_EMBED_DIM, BATCH_SIZE, GAMMA
 
-# --- [개선] Dueling DQN 구조 ---
+# --- [개선] Dueling DQN 구조 (최적화 버전) ---
 class Q_Net(nn.Module):
-    def __init__(self, state_dim, action_dim, hid_shape=(256, 128, 64)):
+    def __init__(self, state_dim, action_dim, hid_shape=(128, 64)):
         super().__init__()
         
-        # Shared Feature Extractor
+        # Shared Feature Extractor (레이어 축소로 연산 효율화)
         self.feature = nn.Sequential(
             nn.Linear(state_dim, hid_shape[0]),
-            nn.LayerNorm(hid_shape[0]),  # Batch Norm 대신 Layer Norm
             nn.ReLU(),
-            nn.Dropout(p=0.2),
+            nn.Dropout(p=0.1),  # 0.2 -> 0.1 (드롭아웃 감소)
             
             nn.Linear(hid_shape[0], hid_shape[1]),
-            nn.LayerNorm(hid_shape[1]),
             nn.ReLU(),
-            nn.Dropout(p=0.2),
         )
         
         # Value Stream (상태 가치)
-        self.value_stream = nn.Sequential(
-            nn.Linear(hid_shape[1], hid_shape[2]),
-            nn.ReLU(),
-            nn.Linear(hid_shape[2], 1)
-        )
+        self.value_stream = nn.Linear(hid_shape[1], 1)
         
         # Advantage Stream (행동 우위)
-        self.advantage_stream = nn.Sequential(
-            nn.Linear(hid_shape[1], hid_shape[2]),
-            nn.ReLU(),
-            nn.Linear(hid_shape[2], action_dim)
-        )
+        self.advantage_stream = nn.Linear(hid_shape[1], action_dim)
         
         # [개선] Xavier 초기화
         self.apply(self._init_weights)
@@ -120,7 +109,7 @@ class DQN_Agent:
         return action_idx, q_values.squeeze(0).detach().cpu(), sorted_importance
 
 
-# --- [개선] 더 깊고 표현력 있는 Mixer ---
+# --- [개선] 최적화된 Mixer 네트워크 ---
 class Mixer(nn.Module):
     def __init__(self, n_agents, state_dim, embed_dim):
         super().__init__()
@@ -128,35 +117,25 @@ class Mixer(nn.Module):
         self.state_dim = state_dim
         self.embed_dim = embed_dim
         
-        # Hypernet for W1 (더 깊은 구조)
+        # Hypernet for W1 (단순화)
         self.hyper_w1 = nn.Sequential(
-            nn.Linear(state_dim, 128),
+            nn.Linear(state_dim, 64),
             nn.ReLU(),
-            nn.Linear(128, embed_dim * n_agents),
-            nn.ReLU()
+            nn.Linear(64, embed_dim * n_agents)
         )
         
         # Hypernet for b1
-        self.hyper_b1 = nn.Sequential(
-            nn.Linear(state_dim, 64),
-            nn.ReLU(),
-            nn.Linear(64, embed_dim)
-        )
+        self.hyper_b1 = nn.Linear(state_dim, embed_dim)
         
-        # Hypernet for W2 (더 깊은 구조)
+        # Hypernet for W2 (단순화)
         self.hyper_w2 = nn.Sequential(
-            nn.Linear(state_dim, 64),
+            nn.Linear(state_dim, 32),
             nn.ReLU(),
-            nn.Linear(64, embed_dim),
-            nn.ReLU()
+            nn.Linear(32, embed_dim)
         )
         
         # Hypernet for b2
-        self.hyper_b2 = nn.Sequential(
-            nn.Linear(state_dim, 32),
-            nn.ReLU(),
-            nn.Linear(32, 1)
-        )
+        self.hyper_b2 = nn.Linear(state_dim, 1)
         
         # [개선] Xavier 초기화
         self.apply(self._init_weights)
@@ -215,7 +194,7 @@ class QMIX_Learner:
         
         # [개선] Learning Rate Scheduler
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            self.optimizer, T_max=1000, eta_min=1e-6
+            self.optimizer, T_max=500, eta_min=1e-6  # 1000 -> 500 (에피소드 감소에 맞춤)
         )
         
     def select_actions(self, obs_dict, epsilon):
