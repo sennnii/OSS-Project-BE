@@ -69,30 +69,31 @@ class MARLStockEnv(gym.Env):
             
         current_price = self.prices.iloc[self.current_step + self.window_size - 1]
         
-        global_portfolio_state = []
+        # [성능 최적화] 벡터화된 포트폴리오 상태 계산
+        positions_array = np.array(self.positions, dtype=np.float32)
+        entry_prices_array = np.array(self.entry_prices, dtype=np.float32)
+        
+        # 벡터화된 unrealized return 계산
+        price_diff = np.where(positions_array == 1, 
+                             current_price - entry_prices_array,
+                             np.where(positions_array == -1,
+                                     entry_prices_array - current_price,
+                                     0.0))
+        unrealized_returns = np.divide(price_diff, entry_prices_array + 1e-9,
+                                      out=np.zeros_like(price_diff),
+                                      where=(entry_prices_array != 0))
+        unrealized_returns = np.clip(unrealized_returns, -1.0, 1.0)
+        
         observations = {}
+        global_portfolio_state = []
+        
+        market_data_flats = [market_data_agent_0_flat, market_data_agent_1_flat, market_data_agent_2_flat]
         
         for i in range(self.n_agents):
-            pos_signal = self.positions[i]
-            entry_price = self.entry_prices[i]
+            own_portfolio_state = np.array([positions_array[i], unrealized_returns[i]], dtype=np.float32)
             
-            unrealized_return_pct = 0.0
-            if pos_signal == 1 and entry_price != 0:
-                unrealized_return_pct = (current_price - entry_price) / (entry_price + 1e-9)
-            elif pos_signal == -1 and entry_price != 0:
-                unrealized_return_pct = (entry_price - current_price) / (entry_price + 1e-9)
-            unrealized_return_pct = np.clip(unrealized_return_pct, -1.0, 1.0)
-            
-            own_portfolio_state = np.array([pos_signal, unrealized_return_pct], dtype=np.float32)
-            
-            if i == 0:
-                obs_flat = market_data_agent_0_flat
-            elif i == 1:
-                obs_flat = market_data_agent_1_flat
-            elif i == 2:
-                obs_flat = market_data_agent_2_flat
-            else:
-                obs_flat = market_data_global_flat
+            # 에이전트별 관측 데이터 선택
+            obs_flat = market_data_flats[i] if i < 3 else market_data_global_flat
                 
             observations[f'agent_{i}'] = np.concatenate([obs_flat, own_portfolio_state])
             global_portfolio_state.append(own_portfolio_state)
