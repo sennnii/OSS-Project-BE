@@ -8,3 +8,11 @@ __pycache__/
 .venv/
 venv/
 ENV/
+
+# Data cache
+.cache/
+*.pkl
+
+# Model checkpoints
+*.pth
+best_model.pth

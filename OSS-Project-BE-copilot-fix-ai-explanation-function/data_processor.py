@@ -1,10 +1,17 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import os
+import pickle
+from pathlib import Path
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
 # --- Config ---
 from config import TICKER, VIX_TICKER, START_DATE, END_DATE
+
+# [성능 최적화] 캐시 디렉토리 설정
+CACHE_DIR = Path(__file__).parent / '.cache'
+CACHE_DIR.mkdir(exist_ok=True)
 
 # ---- pandas-ta 호환 래퍼 (이전과 동일) -----------------------------
 try:
@@ -99,6 +106,19 @@ class DataProcessor:
         return df
 
     def fetch_data(self):
+        # [성능 최적화] 캐시된 데이터 확인
+        cache_file = CACHE_DIR / f"price_data_{self.ticker_str}_{self.start}_{self.end}.pkl"
+        
+        if cache_file.exists():
+            try:
+                print(f"캐시된 데이터 로드 중 ({cache_file.name})...")
+                with open(cache_file, 'rb') as f:
+                    df = pickle.load(f)
+                print("캐시 데이터 로드 완료!")
+                return df
+            except Exception as e:
+                print(f"캐시 로드 실패 ({e}). 새로 다운로드합니다.")
+        
         print(f"데이터 다운로드 중 ({self.ticker_str}, {self.vix_ticker})...")
         df = yf.download(self.ticker_str, start=self.start, end=self.end, group_by="column", auto_adjust=False, progress=False, threads=False)
         df = self._flatten_cols(df)
@@ -151,6 +171,15 @@ class DataProcessor:
             pass
             
         df = df.sort_index()
+        
+        # [성능 최적화] 캐시에 저장
+        try:
+            with open(cache_file, 'wb') as f:
+                pickle.dump(df, f)
+            print(f"데이터 캐시 저장 완료: {cache_file.name}")
+        except Exception as e:
+            print(f"캐시 저장 실패 ({e}). 계속 진행합니다.")
+        
         return df
 
     def calculate_features(self, df):

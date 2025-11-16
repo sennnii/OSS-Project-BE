@@ -6,7 +6,9 @@ import time
 
 from config import (
     DEVICE, N_AGENTS, WINDOW_SIZE, BUFFER_SIZE, BATCH_SIZE, 
-    TARGET_UPDATE_FREQ, NUM_EPISODES, EPSILON_START, EPSILON_END, EPSILON_DECAY_STEPS, WARMUP_STEPS
+    TARGET_UPDATE_FREQ, NUM_EPISODES, EPSILON_START, EPSILON_END, EPSILON_DECAY_STEPS, WARMUP_STEPS,
+    TRAIN_FREQUENCY, UPDATES_PER_STEP_EARLY, UPDATES_PER_STEP_LATE, EARLY_EPISODE_THRESHOLD,
+    EARLY_STOPPING_PATIENCE, EARLY_STOPPING_MIN_DELTA
 )
 from data_processor import DataProcessor
 from environment import MARLStockEnv
@@ -185,9 +187,14 @@ def main():
     episode_q_values = []
     best_reward = -np.inf
     
+    # [성능 최적화] 조기 종료를 위한 변수
+    no_improvement_count = 0
+    best_avg_reward = -np.inf
+    
     print(f"\n--- QMIX {NUM_EPISODES} 에피소드 학습 시작 ---")
     print(f"--- Obs: A0={obs_dim_0}, A1={obs_dim_1}, A2={obs_dim_2} | State={state_dim} ---")
     print(f"--- Warmup: {WARMUP_STEPS} steps with random actions ---")
+    print(f"--- 조기 종료: patience={EARLY_STOPPING_PATIENCE}, min_delta={EARLY_STOPPING_MIN_DELTA} ---")
     
     for i_episode in range(NUM_EPISODES):
         obs_dict, info = train_env.reset(initial_portfolio=None) 
@@ -225,10 +232,10 @@ def main():
             buffer.add(global_state, obs_dict, actions_dict, team_reward, 
                        next_global_state, next_obs_dict, done)
                        
-            # [개선] 학습은 warmup 후에만 시작
-            if warmup_done and len(buffer) >= BATCH_SIZE * 2:
-                # 초반에는 더 많이 학습
-                num_updates = 8 if i_episode < 50 else 4
+            # [성능 최적화] 학습은 warmup 후에만, 빈도를 낮춤
+            if warmup_done and len(buffer) >= BATCH_SIZE * 2 and total_steps % TRAIN_FREQUENCY == 0:
+                # 초반에는 더 많이 학습하되, 과도하지 않게
+                num_updates = UPDATES_PER_STEP_EARLY if i_episode < EARLY_EPISODE_THRESHOLD else UPDATES_PER_STEP_LATE
                 for _ in range(num_updates):
                     loss, q_val = learner.train(buffer)
                     if loss is not None:
@@ -252,6 +259,21 @@ def main():
         if episode_team_reward > best_reward:
             best_reward = episode_team_reward
             # torch.save(learner.state_dict(), 'best_model.pth')
+
+        # [성능 최적화] 조기 종료 체크
+        if len(episode_rewards) >= 10:
+            current_avg_reward = np.mean(episode_rewards[-10:])
+            if current_avg_reward > best_avg_reward + EARLY_STOPPING_MIN_DELTA:
+                best_avg_reward = current_avg_reward
+                no_improvement_count = 0
+            else:
+                no_improvement_count += 1
+            
+            # 충분한 에피소드 후 조기 종료
+            if i_episode >= 50 and no_improvement_count >= EARLY_STOPPING_PATIENCE:
+                print(f"\n조기 종료: {no_improvement_count} 에피소드 동안 개선 없음")
+                print(f"최고 평균 보상: {best_avg_reward:.2f}")
+                break
 
         # [수정] 매 에피소드마다 출력 + 시간 표시
         ep_time = time.time() - start_time

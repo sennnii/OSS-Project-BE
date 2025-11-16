@@ -16,12 +16,12 @@ class Q_Net(nn.Module):
             nn.Linear(state_dim, hid_shape[0]),
             nn.LayerNorm(hid_shape[0]),  # Batch Norm 대신 Layer Norm
             nn.ReLU(),
-            nn.Dropout(p=0.2),
+            nn.Dropout(p=0.1),  # 0.2 -> 0.1 (과적합 방지 + 속도 향상)
             
             nn.Linear(hid_shape[0], hid_shape[1]),
             nn.LayerNorm(hid_shape[1]),
             nn.ReLU(),
-            nn.Dropout(p=0.2),
+            nn.Dropout(p=0.1),  # 0.2 -> 0.1
         )
         
         # Value Stream (상태 가치)
@@ -97,27 +97,34 @@ class DQN_Agent:
         return self.q_net.parameters()
         
     def get_prediction_with_reason(self, obs, feature_names, window_size, n_features):
-        obs_tensor = torch.FloatTensor(obs).unsqueeze(0).to(self.dvc).requires_grad_()
+        # [성능 최적화] 추론 모드로 변경하여 불필요한 그래디언트 계산 방지
+        with torch.no_grad():
+            obs_tensor = torch.FloatTensor(obs).unsqueeze(0).to(self.dvc)
+            q_values = self.q_net(obs_tensor)
+            action_idx = torch.argmax(q_values, dim=1).item()
+        
+        # 중요도 계산을 위해서만 그래디언트 활성화
+        obs_tensor_grad = torch.FloatTensor(obs).unsqueeze(0).to(self.dvc).requires_grad_()
         self.q_net.zero_grad()
         
-        q_values = self.q_net(obs_tensor)
-        action_idx = torch.argmax(q_values, dim=1).item()
-        target_q_value = q_values[0, action_idx]
+        q_values_grad = self.q_net(obs_tensor_grad)
+        target_q_value = q_values_grad[0, action_idx]
         
         target_q_value.backward()
         
-        grads = obs_tensor.grad.squeeze(0)
+        grads = obs_tensor_grad.grad.squeeze(0)
         
         n_obs_features = window_size * n_features
         obs_grads = grads[:n_obs_features]
         
         grads_reshaped = obs_grads.view(window_size, n_features)
         
+        # [성능 최적화] 절대값 합계 계산 최적화
         feature_importance = grads_reshaped.abs().sum(dim=0).cpu().numpy()
         importance_dict = dict(zip(feature_names, feature_importance))
         sorted_importance = sorted(importance_dict.items(), key=lambda item: item[1], reverse=True)
         
-        return action_idx, q_values.squeeze(0).detach().cpu(), sorted_importance
+        return action_idx, q_values.squeeze(0).cpu(), sorted_importance
 
 
 # --- [개선] 더 깊고 표현력 있는 Mixer ---
@@ -213,10 +220,11 @@ class QMIX_Learner:
         # [개선] AdamW 옵티마이저 + 가중치 감쇠
         self.optimizer = torch.optim.AdamW(self.params, lr=LR, weight_decay=1e-5)
         
-        # [개선] Learning Rate Scheduler
+        # [성능 최적화] Learning Rate Scheduler - 에피소드 단위로 업데이트
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            self.optimizer, T_max=1000, eta_min=1e-6
+            self.optimizer, T_max=200, eta_min=1e-6
         )
+        self.train_steps = 0
         
     def select_actions(self, obs_dict, epsilon):
         actions = {}
@@ -262,9 +270,17 @@ class QMIX_Learner:
         torch.nn.utils.clip_grad_norm_(self.params, 5.0)
         
         self.optimizer.step()
-        self.scheduler.step()
+        
+        # [성능 최적화] Scheduler는 주기적으로만 업데이트
+        self.train_steps += 1
+        if self.train_steps % 100 == 0:
+            self.scheduler.step()
         
         return loss.item(), q_total.mean().item()  # Return loss and avg Q for monitoring
+    
+    def update_scheduler(self):
+        """에피소드가 끝날 때 호출"""
+        self.scheduler.step()
 
     def update_target_networks(self):
         for agent in self.agents:

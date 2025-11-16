@@ -35,16 +35,26 @@ START_DATE = "2020-11-12"
 END_DATE = "2025-11-11"
 
 # --- 학습 설정 ---
-# [개선 8] 에피소드 수 증가 - 충분한 학습
-NUM_EPISODES = 200  # 100 -> 200 (더 충분한 학습)
+# [개선 8] 에피소드 수 최적화 - 효율적인 학습
+NUM_EPISODES = 150  # 200 -> 150 (성능 vs 시간 균형)
 
 # [개선 9] 탐험 설정 추가
 EPSILON_START = 1.0
 EPSILON_END = 0.05  # 0.01 -> 0.05 (최소 탐험 유지)
 EPSILON_DECAY_STEPS = 150000  # 100000 -> 150000 (더 긴 탐험 기간)
 
-# [개선 11] Warmup 설정 - 초기 경험 수집
-WARMUP_STEPS = 5000  # 학습 전 랜덤 행동으로 경험 수집
+# [개선 11] Warmup 설정 - 초기 경험 수집 최적화
+WARMUP_STEPS = 3000  # 학습 전 랜덤 행동으로 경험 수집 (5000 -> 3000)
 
 # [개선 10] 보상 스케일링 - Q-value collapse 방지를 위해 크게 증가
 REWARD_SCALE = 100.0  # 보상을 주가 대비 비율로 변환
+
+# [성능 최적화] 학습 빈도 설정
+TRAIN_FREQUENCY = 1  # 매 스텝마다 학습
+UPDATES_PER_STEP_EARLY = 3  # 초기 에피소드 업데이트 횟수 (8 -> 3)
+UPDATES_PER_STEP_LATE = 2   # 후기 에피소드 업데이트 횟수 (4 -> 2)
+EARLY_EPISODE_THRESHOLD = 30  # 초기 에피소드 임계값 (50 -> 30)
+
+# [성능 최적화] 조기 종료 설정
+EARLY_STOPPING_PATIENCE = 30  # 개선이 없으면 학습 조기 종료
+EARLY_STOPPING_MIN_DELTA = 0.1  # 최소 개선 폭
