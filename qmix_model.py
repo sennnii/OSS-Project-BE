@@ -8,26 +8,24 @@ from config import N_AGENTS, LR, TAU, MIXER_EMBED_DIM, BATCH_SIZE, GAMMA
 
 # --- [개선] Dueling DQN 구조 (최적화 버전) ---
 class Q_Net(nn.Module):
-    def __init__(self, state_dim, action_dim, hid_shape=(128, 64)):
+    def __init__(self, state_dim, action_dim, hid_shape=(64, 32)):  # 더 작게
         super().__init__()
         
-        # Shared Feature Extractor (레이어 축소로 연산 효율화)
         self.feature = nn.Sequential(
             nn.Linear(state_dim, hid_shape[0]),
+            nn.LayerNorm(hid_shape[0]),  # 🆕 LayerNorm 추가
             nn.ReLU(),
-            nn.Dropout(p=0.1),  # 0.2 -> 0.1 (드롭아웃 감소)
+            nn.Dropout(p=0.2),  # 0.1 -> 0.2 (더 강한 정규화)
             
             nn.Linear(hid_shape[0], hid_shape[1]),
+            nn.LayerNorm(hid_shape[1]),  # 🆕 LayerNorm 추가
             nn.ReLU(),
+            nn.Dropout(p=0.2),
         )
         
-        # Value Stream (상태 가치)
         self.value_stream = nn.Linear(hid_shape[1], 1)
-        
-        # Advantage Stream (행동 우위)
         self.advantage_stream = nn.Linear(hid_shape[1], action_dim)
         
-        # [개선] Xavier 초기화
         self.apply(self._init_weights)
     
     def _init_weights(self, m):
@@ -190,7 +188,7 @@ class QMIX_Learner:
         self.params += list(self.mixer.parameters())
         
         # [개선] AdamW 옵티마이저 + 가중치 감쇠
-        self.optimizer = torch.optim.AdamW(self.params, lr=LR, weight_decay=1e-5)
+        self.optimizer = torch.optim.AdamW(self.params, lr=LR, weight_decay=1e-4)
         
         # [개선] Learning Rate Scheduler
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(

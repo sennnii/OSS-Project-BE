@@ -110,6 +110,26 @@ def print_ui_output(
     print("=============================================")
 
 
+def test_model(learner, test_env, episodes=5):
+    """모델 성능을 테스트하는 함수"""
+    total_rewards = []
+    
+    for _ in range(episodes):
+        obs_dict, info = test_env.reset(initial_portfolio=None)
+        episode_reward = 0.0
+        done = False
+        
+        while not done:
+            actions_dict = learner.select_actions(obs_dict, epsilon=0.0)  # greedy
+            obs_dict, rewards_dict, dones_dict, _, info = test_env.step(actions_dict)
+            episode_reward += rewards_dict['agent_0']
+            done = dones_dict['__all__']
+        
+        total_rewards.append(episode_reward)
+    
+    return np.mean(total_rewards)
+
+
 def main():
     start_time = time.time()
     
@@ -185,9 +205,17 @@ def main():
     episode_q_values = []
     best_reward = -np.inf
     
+    # 🆕 조기 종료를 위한 변수 추가
+    best_test_reward = -np.inf
+    no_improve_count = 0
+    patience = 5  # 100 에피소드(20*5) 동안 개선 없으면 중단
+    validation_interval = 20  # 20 에피소드마다 검증
+    early_stop = False
+    
     print(f"\n--- QMIX {NUM_EPISODES} 에피소드 학습 시작 ---")
     print(f"--- Obs: A0={obs_dim_0}, A1={obs_dim_1}, A2={obs_dim_2} | State={state_dim} ---")
     print(f"--- Warmup: {WARMUP_STEPS} steps with random actions ---")
+    print(f"--- 조기 종료: {validation_interval} 에피소드마다 검증, patience={patience} ---")
     
     for i_episode in range(NUM_EPISODES):
         obs_dict, info = train_env.reset(initial_portfolio=None) 
@@ -225,16 +253,9 @@ def main():
             buffer.add(global_state, obs_dict, actions_dict, team_reward, 
                        next_global_state, next_obs_dict, done)
                        
-            # [개선] 학습은 warmup 후에만 시작
             if warmup_done and len(buffer) >= BATCH_SIZE * 2:
-                # 초반에는 더 많이 학습, 후반에는 적게
-                if i_episode < 30:
-                    num_updates = 8
-                elif i_episode < 60:
-                    num_updates = 4
-                else:
-                    num_updates = 2  # 후반부는 학습 빈도 감소
-                    
+                num_updates = 2 
+                
                 for _ in range(num_updates):
                     loss, q_val = learner.train(buffer)
                     if loss is not None:
@@ -257,7 +278,25 @@ def main():
         # [개선] Best 모델 저장
         if episode_team_reward > best_reward:
             best_reward = episode_team_reward
-            # torch.save(learner.state_dict(), 'best_model.pth')
+            # torch.save(learner.state_dict(), 'best_train_model.pth')
+
+        # 🆕 조기 종료 로직 추가
+        if warmup_done and i_episode >= 50 and (i_episode + 1) % validation_interval == 0:
+            print(f"\n[검증 중... Ep {i_episode+1}]")
+            test_reward = test_model(learner, test_env, episodes=3)
+            
+            if test_reward > best_test_reward:
+                best_test_reward = test_reward
+                torch.save(learner.state_dict(), 'best_model.pth')
+                no_improve_count = 0
+                print(f"✅ 새로운 최고 검증 성능: {test_reward:.2f} (모델 저장됨)")
+            else:
+                no_improve_count += 1
+                print(f"⚠️  검증 성능: {test_reward:.2f} (최고: {best_test_reward:.2f}, 정체: {no_improve_count}/{patience})")
+            
+            if no_improve_count >= patience:
+                print(f"\n🛑 조기 종료: {i_episode + 1} 에피소드에서 학습 중단 (성능 정체)")
+                early_stop = True
 
         # [수정] 매 에피소드마다 출력 + 시간 표시
         ep_time = time.time() - start_time
@@ -287,6 +326,15 @@ def main():
                       f"Avg: {avg_reward:.2f} | "
                       f"Best: {best_reward:.2f} | "
                       f"Time: {ep_time/60:.1f}m")
+        
+        # 🆕 조기 종료 체크
+        if early_stop:
+            break
+
+    # 🆕 최고 모델 로드 (조기 종료 시)
+    if early_stop and best_test_reward > -np.inf:
+        print("\n최고 성능 모델 로드 중...")
+        learner.load_state_dict(torch.load('best_model.pth'))
 
     print("--- 학습 완료 ---")
 
@@ -299,6 +347,7 @@ def main():
         print(f"    - 초기 50 에피소드 평균: {np.mean(episode_rewards[:min(50, len(episode_rewards))]):.2f}")
         print(f"    - 최종 50 에피소드 평균: {np.mean(episode_rewards[-min(50, len(episode_rewards)):]):.2f}")
     print(f"    - 최고 에피소드 보상: {best_reward:.2f}")
+    print(f"    - 최고 검증 보상: {best_test_reward:.2f}")
 
     print("\n--- [1] 전체 테스트 기간 백테스트 ---")
     
