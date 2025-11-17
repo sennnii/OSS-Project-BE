@@ -249,3 +249,24 @@ class QMIX_Learner:
             
         for param, target_param in zip(self.mixer.parameters(), self.target_mixer.parameters()):
             target_param.data.copy_(TAU * param.data + (1 - TAU) * target_param.data)
+
+    def state_dict(self):
+        state = {
+            'agents': [agent.q_net.state_dict() for agent in self.agents],
+            'target_agents': [agent.target_q_net.state_dict() for agent in self.agents],
+            'mixer': self.mixer.state_dict(),
+            'target_mixer': self.target_mixer.state_dict(),
+            'optimizer': self.optimizer.state_dict(),
+            'scheduler': self.scheduler.state_dict()
+        }
+        return state
+
+    def load_state_dict(self, state_dict):
+        for i, agent in enumerate(self.agents):
+            agent.q_net.load_state_dict(state_dict['agents'][i])
+            agent.target_q_net.load_state_dict(state_dict['target_agents'][i])
+        
+        self.mixer.load_state_dict(state_dict['mixer'])
+        self.target_mixer.load_state_dict(state_dict['target_mixer'])
+        self.optimizer.load_state_dict(state_dict['optimizer'])
+        self.scheduler.load_state_dict(state_dict['scheduler'])
