@@ -158,7 +158,7 @@ def main():
     (features_unnormalized_df, prices_df, feature_names,
      agent_0_cols, agent_1_cols, agent_2_cols) = processor.process() 
 
-    split_idx = int(len(features_unnormalized_df) * 0.8)
+    split_idx = int(len(features_unnormalized_df) * 0.9)
     if split_idx < WINDOW_SIZE * 2:
         print("오류: 데이터가 너무 적습니다.")
         return
