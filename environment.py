@@ -138,12 +138,12 @@ class MARLStockEnv(gym.Env):
                 if current_pos == -1:
                     realized_return = (self.entry_prices[i] - new_price) / (self.entry_prices[i] + 1e-9)
                     instant_rewards += realized_return
-                    transaction_costs += 0.003
+                    transaction_costs += 0.0015  # ⭐ 0.003 → 0.0015 (0.3% → 0.15%)
                     
                 self.positions[i] = 1
                 if current_pos != 1: 
                     self.entry_prices[i] = float(new_price)
-                    transaction_costs += 0.003
+                    transaction_costs += 0.0015  # ⭐ 0.003 → 0.0015
                     
             elif action == 1:  # Hold
                 pass
@@ -152,32 +152,32 @@ class MARLStockEnv(gym.Env):
                 if current_pos == 1:
                     realized_return = (new_price - self.entry_prices[i]) / (self.entry_prices[i] + 1e-9)
                     instant_rewards += realized_return
-                    transaction_costs += 0.003
+                    transaction_costs += 0.0015  # ⭐ 0.003 → 0.0015
                     
                 self.positions[i] = -1
                 if current_pos != -1:
                     self.entry_prices[i] = float(new_price)
-                    transaction_costs += 0.003
+                    transaction_costs += 0.0015  # ⭐ 0.003 → 0.0015
 
-        # ⭐ 핵심 개선: 단순하고 안정적인 보상
+        # 보상 계산
         joint_position = sum(self.positions)
         
-        # 1. 기본 홀딩 보상 (과도한 증폭 제거)
+        # 1. 기본 홀딩 보상
         holding_reward = float(joint_position * price_return)
         
-        # 2. 실현 수익 (증폭 제거)
-        instant_rewards = instant_rewards * 1.0  # 3.0 제거
+        # 2. 실현 수익
+        instant_rewards = instant_rewards * 1.0
         
-        # 3. 거래 비용 (정상화)
-        transaction_costs = transaction_costs * 1.0  # 0.3 -> 1.0
+        # 3. 거래 비용
+        transaction_costs = transaction_costs * 1.0
         
-        # 4. 🆕 정렬 보너스 (에이전트들이 같은 방향일 때 보상)
-        alignment = abs(joint_position) / self.n_agents  # 0~1
-        alignment_bonus = alignment * 0.01  # 최대 0.01
+        # 4. 정렬 보너스
+        alignment = abs(joint_position) / self.n_agents
+        alignment_bonus = alignment * 0.01
         
-        # 5. 🆕 과도한 거래 페널티 (너무 자주 매매하면 페널티)
+        # 5. 과도한 거래 페널티
         action_changes = sum([1 for i in range(self.n_agents) 
-                            if actions[f'agent_{i}'] != 1])  # Hold가 아닌 행동
+                            if actions[f'agent_{i}'] != 1])
         overtrading_penalty = -0.005 * action_changes if action_changes == self.n_agents else 0
         
         # 6. 최종 보상
@@ -189,10 +189,10 @@ class MARLStockEnv(gym.Env):
             overtrading_penalty
         )
         
-        # 7. REWARD_SCALE 적용 (이제 1.0)
+        # 7. REWARD_SCALE 적용
         team_reward = raw_team_reward * REWARD_SCALE
         
-        # 8. ⭐ 보상 클리핑 추가 (안정성)
+        # 8. 보상 클리핑
         team_reward = np.clip(team_reward, -0.1, 0.1)
         
         self.episode_returns.append(team_reward)
