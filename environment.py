@@ -9,9 +9,6 @@ class MARLStockEnv(gym.Env):
                  n_agents=N_AGENTS, window_size=WINDOW_SIZE):
         super().__init__()
         
-        if n_agents != 3:
-            print(f"경고: N_AGENTS({n_agents})가 3이 아닙니다.")
-            
         self.df = features_df
         self.prices = prices_df
         self.window_size = window_size
@@ -48,9 +45,6 @@ class MARLStockEnv(gym.Env):
         self.current_step = 0
         self.positions = [0] * self.n_agents
         self.entry_prices = [0.0] * self.n_agents
-        
-        # [개선] 누적 보상 추적
-        self.episode_returns = []
 
     def _get_obs_and_state(self):
         start = self.current_step
@@ -111,8 +105,6 @@ class MARLStockEnv(gym.Env):
             self.positions = [0] * self.n_agents
             self.entry_prices = [0.0] * self.n_agents
             
-        self.episode_returns = []
-            
         obs, state = self._get_obs_and_state()
         return obs, {"global_state": state}
 
@@ -127,75 +119,25 @@ class MARLStockEnv(gym.Env):
         
         price_return = (new_price - old_price) / (old_price + 1e-9)
         
-        instant_rewards = 0.0
-        transaction_costs = 0.0
+        # ==================== 💎 초단순 보상 ====================
         
+        # 거래 처리
         for i in range(self.n_agents):
             action = actions[f'agent_{i}']
-            current_pos = self.positions[i]
-
+            
             if action == 0:  # Buy
-                if current_pos == -1:
-                    realized_return = (self.entry_prices[i] - new_price) / (self.entry_prices[i] + 1e-9)
-                    instant_rewards += realized_return
-                    transaction_costs += 0.0015  # ⭐ 0.003 → 0.0015 (0.3% → 0.15%)
-                    
                 self.positions[i] = 1
-                if current_pos != 1: 
-                    self.entry_prices[i] = float(new_price)
-                    transaction_costs += 0.0015  # ⭐ 0.003 → 0.0015
-                    
-            elif action == 1:  # Hold
-                pass
-                
+                self.entry_prices[i] = float(new_price)
             elif action == 2:  # Sell
-                if current_pos == 1:
-                    realized_return = (new_price - self.entry_prices[i]) / (self.entry_prices[i] + 1e-9)
-                    instant_rewards += realized_return
-                    transaction_costs += 0.0015  # ⭐ 0.003 → 0.0015
-                    
                 self.positions[i] = -1
-                if current_pos != -1:
-                    self.entry_prices[i] = float(new_price)
-                    transaction_costs += 0.0015  # ⭐ 0.003 → 0.0015
-
-        # 보상 계산
+                self.entry_prices[i] = float(new_price)
+        
+        # 보상 = 포지션 합 × 가격 변화율
         joint_position = sum(self.positions)
+        team_reward = float(joint_position * price_return * REWARD_SCALE)
         
-        # 1. 기본 홀딩 보상
-        holding_reward = float(joint_position * price_return)
+        # =======================================================
         
-        # 2. 실현 수익
-        instant_rewards = instant_rewards * 1.0
-        
-        # 3. 거래 비용
-        transaction_costs = transaction_costs * 1.0
-        
-        # 4. 정렬 보너스
-        alignment = abs(joint_position) / self.n_agents
-        alignment_bonus = alignment * 0.01
-        
-        # 5. 과도한 거래 페널티
-        action_changes = sum([1 for i in range(self.n_agents) 
-                            if actions[f'agent_{i}'] != 1])
-        overtrading_penalty = -0.005 * action_changes if action_changes == self.n_agents else 0
-        
-        # 6. 최종 보상
-        raw_team_reward = (
-            holding_reward + 
-            instant_rewards - 
-            transaction_costs + 
-            alignment_bonus +
-            overtrading_penalty
-        )
-        
-        # 7. REWARD_SCALE 적용
-        team_reward = raw_team_reward * REWARD_SCALE
-        
-        # 8. 보상 클리핑
-        team_reward = np.clip(team_reward, -0.1, 0.1)
-        
-        self.episode_returns.append(team_reward)
         rewards = {f'agent_{i}': team_reward for i in range(self.n_agents)}
         
         next_obs, next_state = self._get_obs_and_state()
@@ -204,11 +146,9 @@ class MARLStockEnv(gym.Env):
         dones['__all__'] = done
         
         info = {
-            "global_state": next_state, 
+            "global_state": next_state,
             "raw_pnl": team_reward,
-            "price_return": price_return,
-            "instant_reward": instant_rewards,
-            "transaction_cost": transaction_costs
+            "price_return": price_return
         }
         
         return next_obs, rewards, dones, False, info
