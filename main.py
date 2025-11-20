@@ -404,9 +404,7 @@ def main():
     else:
         print("    - 백테스트 기간이 0일입니다.")
     
-    # main.py의 그래프 생성 부분 (백테스트 성능 지표 출력 후) 수정
-
-    # 🆕 백테스트 그래프 생성 (KOSPI 비교 추가)
+        # 🆕 백테스트 그래프 생성 (KOSPI 비교 추가)
     if test_days > 0:
         print("\n--- [3] Backtest Visualization ---")
         
@@ -460,48 +458,53 @@ def main():
                 price = test_prices.iloc[step + WINDOW_SIZE]
                 buy_hold_values.append(initial_shares * price)
             
-            # 🆕 KOSPI 지수 다운로드 및 계산
+            # 🆕 KOSPI 지수 다운로드
             kospi_values = []
             try:
-                # 테스트 기간의 날짜 범위 가져오기
-                test_start_date = test_prices.index[WINDOW_SIZE]
-                test_end_date = test_prices.index[WINDOW_SIZE + test_days - 1]
+                test_start = test_prices.index[WINDOW_SIZE]
+                test_end = test_prices.index[WINDOW_SIZE + test_days - 1]
                 
-                print(f"    KOSPI 지수 다운로드 중 ({test_start_date.date()} ~ {test_end_date.date()})...")
+                print(f"    KOSPI 지수 다운로드 중...")
                 
-                # KOSPI 지수 다운로드 (^KS11)
-                kospi_data = yf.download('^KS11', 
-                                        start=test_start_date, 
-                                        end=test_end_date + pd.Timedelta(days=1),
-                                        progress=False)
+                # KOSPI 다운로드
+                kospi_df = yf.download('^KS11', 
+                                      start=test_start - pd.Timedelta(days=10), 
+                                      end=test_end + pd.Timedelta(days=2),
+                                      progress=False,
+                                      auto_adjust=True)
                 
-                if not kospi_data.empty and 'Close' in kospi_data.columns:
-                    # 날짜 인덱스 정리
-                    kospi_data.index = pd.to_datetime(kospi_data.index).tz_localize(None)
+                if not kospi_df.empty:
+                    # Close 컬럼 확인
+                    if isinstance(kospi_df.columns, pd.MultiIndex):
+                        kospi_close = kospi_df['Close'].iloc[:, 0]
+                    else:
+                        kospi_close = kospi_df['Close']
                     
-                    # 테스트 기간과 일치하는 KOSPI 데이터만 추출
-                    kospi_aligned = kospi_data['Close'].reindex(
+                    kospi_df.index = pd.to_datetime(kospi_df.index).tz_localize(None)
+                    
+                    # 테스트 기간과 정렬
+                    kospi_aligned = kospi_close.reindex(
                         test_prices.index[WINDOW_SIZE:WINDOW_SIZE + test_days],
-                        method='ffill'  # 휴장일은 전일 값으로 채움
-                    )
+                        method='ffill'
+                    ).fillna(method='bfill')
                     
-                    # KOSPI 시작 값으로 정규화
-                    kospi_start = kospi_aligned.iloc[0]
+                    # float 변환
+                    kospi_start = float(kospi_aligned.iloc[0])
+                    
                     for step in range(test_days):
-                        kospi_price = kospi_aligned.iloc[step]
+                        kospi_price = float(kospi_aligned.iloc[step])
                         kospi_values.append(initial_capital * (kospi_price / kospi_start))
                     
-                    print(f"    ✅ KOSPI 지수 로드 완료 (시작: {kospi_start:.2f}, 종료: {kospi_aligned.iloc[-1]:.2f})")
+                    print(f"    ✅ KOSPI 로드 완료 (시작: {kospi_start:.2f})")
                 else:
-                    raise Exception("KOSPI 데이터 다운로드 실패")
-                    
+                    raise Exception("KOSPI 데이터 없음")
+                
             except Exception as e:
-                print(f"    ⚠️  KOSPI 지수 로드 실패 ({e}), 삼성전자 주가를 대신 사용합니다.")
-                # KOSPI 실패시 삼성전자 주가로 대체
-                samsung_start = test_prices.iloc[WINDOW_SIZE]
-                for step in range(test_days):
-                    price = test_prices.iloc[step + WINDOW_SIZE]
-                    kospi_values.append(initial_capital * (price / samsung_start))
+                print(f"    ⚠️  KOSPI 로드 실패: {e}")
+                # 삼성전자로 대체
+                samsung_start = float(test_prices.iloc[WINDOW_SIZE])
+                kospi_values = [initial_capital * (float(test_prices.iloc[step + WINDOW_SIZE]) / samsung_start) 
+                               for step in range(test_days)]
             
             # 날짜 인덱스 생성
             if isinstance(test_prices.index, pd.DatetimeIndex):
@@ -534,7 +537,6 @@ def main():
             # 그래프 그리기
             fig, ax = plt.subplots(figsize=(14, 8))
             
-            # 선 그리기 (두 번째 이미지 스타일)
             ax.plot(test_dates, ai_values[:len(test_dates)], 
                    label=f'QMIX Agent (최종: {ai_final:,.0f} 원)', 
                    linewidth=2, color='#1f77b4', linestyle='-')
@@ -545,45 +547,31 @@ def main():
                    label=f'KOSPI (최종: {kospi_final:,.0f} 원)', 
                    linewidth=1.5, linestyle=':', color='#808080')
             
-            # 제목
             title_text = f'QMIX 백테스트 성과 (초기자금: {initial_capital:,} 원)\n'
             title_text += f'Sharpe: {sharpe:.3f} | Sortino: {sortino:.3f} | MDD: {mdd:.2f}%'
             ax.set_title(title_text, fontsize=13, pad=15)
             
-            # 축 레이블
             ax.set_xlabel('날짜', fontsize=11)
             ax.set_ylabel('포트폴리오 가치 (원)', fontsize=11)
-            
-            # 범례
-            ax.legend(loc='upper left', fontsize=9, framealpha=0.95, 
-                     fancybox=True, shadow=True)
-            
-            # 그리드
+            ax.legend(loc='upper left', fontsize=9, framealpha=0.95, fancybox=True, shadow=True)
             ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
             ax.set_axisbelow(True)
             
-            # 날짜 포맷
             if use_dates:
                 ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
                 ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
                 plt.setp(ax.xaxis.get_majorticklabels(), rotation=0, ha='center')
             
-            # y축 포맷
             ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{int(x):,}'))
-            
-            # 스타일
             ax.spines['top'].set_visible(True)
             ax.spines['right'].set_visible(True)
             
-            # 여백
             plt.tight_layout()
-            
-            # 저장
             plt.savefig('backtest_result.png', dpi=300, bbox_inches='tight', facecolor='white')
             print("    ✅ 그래프 저장: backtest_result.png")
             plt.close()
             
-            # 성능 비교 출력
+            # 성능 비교
             print(f"\n--- [3-1] Strategy Comparison ---")
             print(f"    {'Strategy':<20} {'Final Value':>18} {'Return':>10} {'vs KOSPI':>10}")
             print(f"    {'-'*65}")
