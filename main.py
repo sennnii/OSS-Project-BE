@@ -571,6 +571,61 @@ def main():
             print("    ✅ 그래프 저장: backtest_result.png")
             plt.close()
             
+            # ---------------------------------------------------------
+            # [추가] 3-2. 일별 수익금(Daily PnL) 시각화
+            # ---------------------------------------------------------
+            # ai_values는 [초기자금, 1일차 평가액, 2일차 평가액, ...] 순서이므로
+            # 인접한 두 값의 차이를 구하면 일별 손익이 됩니다.
+            daily_profits = np.diff(ai_values)
+            
+            # 날짜축 설정 (첫 날은 수익이 발생하기 전이므로 제외하고 2일차 날짜부터 매칭)
+            # test_dates는 이미 WINDOW_SIZE 이후의 날짜들이므로 길이 조정 필요
+            # ai_values의 길이는 test_days와 같으므로, diff의 결과는 test_days - 1개입니다.
+            # 따라서 날짜도 1번째 인덱스부터 사용합니다.
+            plot_dates = test_dates[1:]
+            
+            if len(plot_dates) == len(daily_profits):
+                fig2, ax2 = plt.subplots(figsize=(14, 6))
+                
+                # 한국 스타일: 이익(>0)은 빨간색, 손실(<0)은 파란색
+                colors = ['red' if p > 0 else 'blue' for p in daily_profits]
+                
+                ax2.bar(plot_dates, daily_profits, color=colors, alpha=0.7, width=0.8)
+                
+                ax2.set_title('일별 수익금 추이 (Daily Profit/Loss)', fontsize=15, pad=15)
+                ax2.set_ylabel('일별 손익 (원)', fontsize=12)
+                ax2.set_xlabel('날짜', fontsize=12)
+                
+                # 0원 기준선 추가
+                ax2.axhline(0, color='black', linewidth=0.8, linestyle='-')
+                
+                # 그리드 설정
+                ax2.grid(True, alpha=0.3, linestyle='--', axis='y')
+                
+                # X축 날짜 포맷
+                if use_dates:
+                    ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+                    ax2.xaxis.set_major_locator(mdates.MonthLocator(interval=1)) # 1개월 단위 표시
+                    plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45, ha='right')
+                
+                # Y축 천 단위 콤마 포맷
+                ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{int(x):,}'))
+                
+                # 최대/최소 수익금 텍스트 표시 (선택사항)
+                max_profit = np.max(daily_profits)
+                min_profit = np.min(daily_profits)
+                ax2.text(plot_dates[np.argmax(daily_profits)], max_profit, f'{int(max_profit):,}', 
+                         ha='center', va='bottom', fontsize=8, color='red')
+                ax2.text(plot_dates[np.argmin(daily_profits)], min_profit, f'{int(min_profit):,}', 
+                         ha='center', va='top', fontsize=8, color='blue')
+
+                plt.tight_layout()
+                plt.savefig('daily_pnl_result.png', dpi=300, bbox_inches='tight', facecolor='white')
+                print("    ✅ 그래프 저장: daily_pnl_result.png")
+                plt.close()
+            else:
+                print("    ⚠️  데이터 길이 불일치로 일별 수익금 그래프를 건너뜁니다.")
+
             # 성능 비교
             print(f"\n--- [3-1] Strategy Comparison ---")
             print(f"    {'Strategy':<20} {'Final Value':>18} {'Return':>10} {'vs KOSPI':>10}")
